@@ -217,7 +217,7 @@ if algoritmo == 'Dijkstra':
     nodos_hospital = {G.nodes[n]['cod']: n for n in G.nodes if n >= len(Data_Anemia)}
     hospital_nombre = st.selectbox("Selecciona el hospital", list(nodos_hospital.keys()))
     nodo_origen = nodos_hospital[hospital_nombre]
-    destino = st.number_input("Nodo destino", min_value=0, max_value=len(Data_Anemia)-1, step=1)
+    destino = st.number_input("Paciente destino", min_value=0, max_value=len(Data_Anemia)-1, step=1)
 
     if st.button("Calcular ruta más corta"):
         try:
@@ -225,6 +225,8 @@ if algoritmo == 'Dijkstra':
             ruta_dijkstra = nx.dijkstra_path(G, source=nodo_origen, target=destino)
             mapa_ruta = generar_mapa_ruta(G, color, ruta_dijkstra, Data_Anemia)
             folium_static(mapa_ruta)
+            distancia_total = sum(G.edges[ruta_dijkstra[i], ruta_dijkstra[i+1]]['weight'] for i in range(len(ruta_dijkstra)-1))
+            st.success(f"Distancia recorrida: {round(distancia_total, 2)} km")
         except Exception as e:
             # Manejo de error
             st.error(f"No es posible calcular la ruta más corta: {e}")
@@ -294,6 +296,10 @@ elif algoritmo == 'Kruskal':
                     folium.PolyLine([loc1, loc2], color='blue', weight=3).add_to(mapa_mst)
 
                 folium_static(mapa_mst)
+
+                longitud_total_mst = sum(mst.edges[e]['weight'] for e in mst.edges)
+                st.success(f"Longitud total del MST: {round(longitud_total_mst, 2)} km")
+
             else:
                 st.warning("El MST no contiene nodos.")
         except Exception as e:
