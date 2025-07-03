@@ -20,7 +20,6 @@ def cargar_datos(ruta):
             (df['TIPO_EDAD'] == 'A')]
     return df.reset_index(drop=True)
 
-
 # Función para calcular distancias entre viviendas con vecinos más cercanos
 def calcular_distancias_viviendas(df, k_vecinos=25):
     coords = np.radians(df[['LATITUD', 'LONGITUD']].values)
@@ -102,16 +101,24 @@ def generar_mapa(G, colores, df):
     # Se recorre el grafo para mostrar los nodos en el mapa
     for n, d in G.nodes(data=True):
         
-        # Se usará el marcador de círculo para representar los nodos
-        folium.CircleMarker(
-            location=(d['pos_lat'], d['pos_lon']),
-            radius=4,
-            color=colores[n],
-            fill=True,
-            fill_color=colores[n],
-            fill_opacity=0.9,
-            tooltip=f"Nodo: {n}<br>Severidad: {df.iloc[n]['GRADO_SEVERIDAD']}<br>Hospital: {df.iloc[n]['NOMBRE_ESTABLECIMIENTO']}"
-        ).add_to(mapa)
+        if n < len(df):
+            # Se usará el marcador de círculo para representar los nodos
+            folium.CircleMarker(
+                location=(d['pos_lat'], d['pos_lon']),
+                radius=4,
+                color=colores[n],
+                fill=True,
+                fill_color=colores[n],
+                fill_opacity=0.9,
+                tooltip=f"Paciente Nº {n}<br>Edad: {df.iloc[n]['EDAD_REGISTRO']}<br>Severidad: {df.iloc[n]['GRADO_SEVERIDAD']}<br>Hospital: {df.iloc[n]['NOMBRE_ESTABLECIMIENTO']}"
+            ).add_to(mapa)
+        else:
+            # Para los hospitales, se usa un marcador normal
+            folium.Marker(
+                location=(d['pos_lat'], d['pos_lon']),
+                icon=folium.Icon(color='blue', icon='plus-sign'),
+                tooltip=f"Hospital: {d['cod']}"
+            ).add_to(mapa)
 
     return mapa
 
@@ -128,11 +135,18 @@ def generar_mapa_ruta(G, colores, nodos_ruta, df):
     # Agregar los nodos del camino/ruta, se usará un marcador para su representación
     for n in nodos_ruta:
         data = G.nodes[n]
-        folium.Marker(
-            location=(data['pos_lat'], data['pos_lon']),
-            icon=folium.Icon(color=colores[n]),
-            tooltip=f"Nodo: {n}<br>Severidad: {df.iloc[n]['GRADO_SEVERIDAD']}<br>Hospital: {df.iloc[n]['NOMBRE_ESTABLECIMIENTO']}"
-        ).add_to(mapa)
+        if n < len(df):
+            folium.Marker(
+                location=(data['pos_lat'], data['pos_lon']),
+                icon=folium.Icon(color=colores[n]),
+                tooltip=f"Paciente Nº {n}<br>Edad: {df.iloc[n]['EDAD_REGISTRO']}<br>Severidad: {df.iloc[n]['GRADO_SEVERIDAD']}<br>Hospital: {df.iloc[n]['NOMBRE_ESTABLECIMIENTO']}"
+            ).add_to(mapa)
+        else:
+            folium.Marker(
+                location=(data['pos_lat'], data['pos_lon']),
+                icon=folium.Icon(color='blue', icon='plus-sign'),
+                tooltip=f"Hospital: {data['cod']}"
+            ).add_to(mapa)
 
     # Se dibujan las aristas de la ruta
     for i in range(len(nodos_ruta)-1):
@@ -143,13 +157,45 @@ def generar_mapa_ruta(G, colores, nodos_ruta, df):
 
     return mapa
 
+def agregar_hospitales_al_grafo(G, colores, df_anemia, df_hospitales, k_vecinos=15):
+    offset = len(G.nodes)  # índice donde empezarán los hospitales
+    
+    coords_anemia = np.radians(df_anemia[['LATITUD', 'LONGITUD']].values)
+    tree = BallTree(coords_anemia, metric='haversine')
+    
+    for i, row in df_hospitales.iterrows():
+        idx = offset + i
+        lat, lon = row['LATITUD'], row['LONGITUD']
+        nombre = row['NOMBRE']
+        G.add_node(idx, pos_lat=lat, pos_lon=lon, cod=nombre)
+        colores.append('blue')
+
+        # Se conecta a k vecinos más cercanos
+        coord_hosp = np.radians([[lat, lon]])
+        distancias, indices = tree.query(coord_hosp, k=k_vecinos)
+
+        for dist, index in zip(distancias[0], indices[0]):
+            distancia_km = dist * 6371
+            G.add_edge(idx, index, weight=round(distancia_km, 3))
+
+
 # Página de Streamlit
+
+# Hospitales desde los que se reparte la galleta
+df_hospitales = pd.DataFrame({
+    'NOMBRE': ['NUEVE DE ABRIL', 'HOSPITAL LAMAS', 'BUENOS AIRES'],
+    'LATITUD': [-6.48597333, -6.41549003, -5.91518],
+    'LONGITUD': [-76.372355, -76.51878761, -77.079845]
+})
+
+
 
 # Inicialización de variables
 ruta = "ANEMIA_DA.csv"
 Data_Anemia = cargar_datos(ruta)
 df_distancias = calcular_distancias_viviendas(Data_Anemia)
 G,color = construir_grafo(Data_Anemia,df_distancias)
+agregar_hospitales_al_grafo(G, color, Data_Anemia, df_hospitales)
 mapa = generar_mapa(G, color, Data_Anemia)
 
 # Interfaz de usuario
@@ -164,45 +210,38 @@ st.subheader("📍 Mapa de conexiones geográficas de pacientes")
 folium_static(mapa)
 
 # Selección de opciones de algoritmos
-algoritmo = st.selectbox("Selecciona el algoritmo: ", ['Dijkstra', 'BFS', 'Kruskal'])
+algoritmo = st.selectbox("Selecciona el algoritmo: ", ['Dijkstra', 'Kruskal'])
 
 if algoritmo == 'Dijkstra':
     # Nodo origen y destino
-    origen = st.number_input("Nodo origen", min_value=0, max_value=len(G.nodes)-1, step=1)
-    destino = st.number_input("Nodo destino", min_value=0, max_value=len(G.nodes)-1, step=1)
+    nodos_hospital = {G.nodes[n]['cod']: n for n in G.nodes if n >= len(Data_Anemia)}
+    hospital_nombre = st.selectbox("Selecciona el hospital", list(nodos_hospital.keys()))
+    nodo_origen = nodos_hospital[hospital_nombre]
+    destino = st.number_input("Nodo destino", min_value=0, max_value=len(Data_Anemia)-1, step=1)
 
     if st.button("Calcular ruta más corta"):
         try:
             # Calcular la ruta más corta usando Dijkstra
-            ruta_dijkstra = nx.dijkstra_path(G, source=origen, target=destino)
+            ruta_dijkstra = nx.dijkstra_path(G, source=nodo_origen, target=destino)
             mapa_ruta = generar_mapa_ruta(G, color, ruta_dijkstra, Data_Anemia)
             folium_static(mapa_ruta)
         except Exception as e:
             # Manejo de error
             st.error(f"No es posible calcular la ruta más corta: {e}")
 
-elif algoritmo == 'BFS':
-    # Nodo origen y pasos
-    origen = st.number_input("Nodo", min_value=0, max_value=len(G.nodes)-1, step=1)
-    max_pasos = st.number_input("Pasos", min_value=1, max_value=10, step=1)
-
-    if st.button("Calcular BFS"):
-        try:
-            # Calcular BFS desde el nodo de origen
-            bfs_edges = list(nx.bfs_edges(G, source=origen, depth_limit=max_pasos))
-            # Obtener los nodos en orden del recorrido
-            nodos_bfs = [origen] + [v for u, v in bfs_edges]
-            mapa_ruta = generar_mapa_ruta(G, color, nodos_bfs, Data_Anemia)
-            folium_static(mapa_ruta)
-        except Exception as e:
-            # Manejo de error
-            st.error(f"Error al calcular BFS: {e}")
-
 elif algoritmo == 'Kruskal':
+    nodos_hospital = {G.nodes[n]['cod']: n for n in G.nodes if n >= len(Data_Anemia)}
+    hospital_nombre = st.selectbox("Selecciona el hospital", list(nodos_hospital.keys()))
+    nodos_hospital = nodos_hospital[hospital_nombre]
     if st.button("Calcular MST"):
         try:
-            # Filtrar los nodos de casos severos
-            nodos_severos = [n for n, d in G.nodes(data=True) if Data_Anemia.iloc[n]['GRADO_SEVERIDAD'] == 'SEV']
+            # Filtrar los nodos de casos severos        
+            nodos_severos = [
+            n for n in range(len(Data_Anemia))
+            if Data_Anemia.iloc[n]['GRADO_SEVERIDAD'] == 'SEV'
+            ]
+
+            nodos_severos.append(nodos_hospital)
             # Se crea un grafo con los nodos severos
             grafo_severos = nx.Graph()
             for n in nodos_severos:
@@ -216,8 +255,8 @@ elif algoritmo == 'Kruskal':
             for i in range(len(nodos_severos)):
                 for j in range(i+1, len(nodos_severos)):
                     n1, n2 = nodos_severos[i], nodos_severos[j]
-                    coord1 = tuple(Data_Anemia.iloc[n1][['LATITUD', 'LONGITUD']])
-                    coord2 = tuple(Data_Anemia.iloc[n2][['LATITUD', 'LONGITUD']])
+                    coord1 = (G.nodes[n1]['pos_lat'], G.nodes[n1]['pos_lon'])
+                    coord2 = (G.nodes[n2]['pos_lat'], G.nodes[n2]['pos_lon'])
                     distancia_km = geodesic(coord1, coord2).km
                     grafo_severos.add_edge(n1, n2, weight=round(distancia_km, 3))
 
@@ -234,10 +273,18 @@ elif algoritmo == 'Kruskal':
                 # Se muestra cada nodo del MST
                 for n in nodos_mst:
                     data = grafo_severos.nodes[n]
+                    tooltip = ""
+                    if n < len(Data_Anemia):
+                        tooltip = f"Nodo: {n}<br>Severidad: {G.nodes[n]['cod']}"
+                        icon = folium.Icon(color=color[n])
+                    else:
+                        tooltip = f"Hospital: {G.nodes[n]['cod']}"
+                        icon = folium.Icon(color='blue', icon='plus-sign')
+                    
                     folium.Marker(
                         location=(data['pos_lat'], data['pos_lon']),
-                        icon=folium.Icon(color=color[n]),
-                        tooltip=f"Nodo: {n}<br>Severidad: {Data_Anemia.iloc[n]['GRADO_SEVERIDAD']}"
+                        icon=icon,
+                        tooltip=tooltip
                     ).add_to(mapa_mst)
 
                 # Se dibujan las aristas del MST
