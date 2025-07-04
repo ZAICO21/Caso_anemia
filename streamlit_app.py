@@ -277,7 +277,7 @@ elif algoritmo == 'Kruskal':
                     data = grafo_severos.nodes[n]
                     tooltip = ""
                     if n < len(Data_Anemia):
-                        tooltip = f"Nodo: {n}<br>Severidad: {G.nodes[n]['cod']}"
+                        tooltip = f"Paciente Nº {n}<br>Edad: {Data_Anemia.iloc[n]['EDAD_REGISTRO']}<br>Severidad: {Data_Anemia.iloc[n]['GRADO_SEVERIDAD']}<br>Hospital: {Data_Anemia.iloc[n]['NOMBRE_ESTABLECIMIENTO']}"
                         icon = folium.Icon(color=color[n])
                     else:
                         tooltip = f"Hospital: {G.nodes[n]['cod']}"
